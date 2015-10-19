@@ -197,12 +197,12 @@ public:
             TypeBuilder<jump_table2_t  *, cross>::get(C),
             TypeBuilder<jump_table3_t  *, cross>::get(C),
 #endif
-            TypeBuilder<uint16_t, cross>::get(C), // nterms
+            TypeBuilder<moz_production_t *, cross>::get(C), // prods
             TypeBuilder<uint16_t, cross>::get(C), // set_size
             TypeBuilder<uint16_t, cross>::get(C), // str_size
             TypeBuilder<uint16_t, cross>::get(C), // tag_size
             TypeBuilder<uint16_t, cross>::get(C), // table_size
-            TypeBuilder<uint16_t, cross>::get(C), // nterm_size
+            TypeBuilder<uint16_t, cross>::get(C), // prod_size
 
             TypeBuilder<unsigned, cross>::get(C), // inst_size
             TypeBuilder<unsigned, cross>::get(C), // memo_size
@@ -218,11 +218,11 @@ public:
 };
 
 template<bool cross>
-class TypeBuilder<mozvm_nterm_entry_t, cross> {
+class TypeBuilder<moz_production_t, cross> {
 public:
   static Type *get(LLVMContext& C) {
       if (NTermEntryType == NULL) {
-          NTermEntryType = StructType::create(C, "mozvm_nterm_entry_t");
+          NTermEntryType = StructType::create(C, "moz_production_t");
       }
       return NTermEntryType;
   }
@@ -232,8 +232,9 @@ public:
           STy->setBody(
             TypeBuilder<moz_inst_t *, cross>::get(C), // begin
             TypeBuilder<moz_inst_t *, cross>::get(C), // end
+            TypeBuilder<char *, cross>::get(C),       // name
             TypeBuilder<unsigned, cross>::get(C),     // call_counter
-            TypeBuilder<moz_jit_func_t, cross>::get(C), //compiled_cod
+            TypeBuilder<moz_jit_func_t, cross>::get(C), //compiled_code
             NULL
             );
       }
@@ -258,12 +259,11 @@ public:
                   TypeBuilder<long *,     cross>::get(C), // memo points
 #endif
                   TypeBuilder<mozpos_t,   cross>::get(C), // cur
-                  TypeBuilder<void *,   cross>::get(C), // jitctx
-                  TypeBuilder<mozvm_nterm_entry_t *, cross>::get(C),
-                  TypeBuilder<mozvm_constant_t, cross>::get(C),
-                  ArrayType::get(TypeBuilder<long, cross>::get(C), 1),
+                  TypeBuilder<void *,   cross>::get(C),   // jitctx
+                  TypeBuilder<mozvm_constant_t, cross>::get(C), // C
+                  ArrayType::get(TypeBuilder<long, cross>::get(C), 1), // stack_
                   NULL);
-          TypeBuilder<mozvm_nterm_entry_t, cross>::setBody(C);
+          TypeBuilder<moz_production_t, cross>::setBody(C);
       }
       return MozRuntimeType;
   }

@@ -1,9 +1,9 @@
 #ifdef MOZVM_ENABLE_JIT
 #include "jit.h"
-#include "pstring.h"
+#include "core/pstring.h"
 #include "jmptbl.h"
 #include "instruction.h"
-#include "karray.h"
+#include "core/karray.h"
 
 #include <memory>
 #include <vector>
@@ -69,14 +69,14 @@ static const Symbol symbols[] = {
 #undef DEFINE_SYMBOL
 };
 
-static inline bool nterm_has_inst(mozvm_nterm_entry_t *e, moz_inst_t *inst)
+static inline bool prod_has_inst(moz_production_t *e, moz_inst_t *inst)
 {
     return e->begin <= inst && inst <= e->end;
 }
 
-static BasicBlock *get_jump_destination(mozvm_nterm_entry_t *e, moz_inst_t *dest, BasicBlock *failBB)
+static BasicBlock *get_jump_destination(moz_production_t *e, moz_inst_t *dest, BasicBlock *failBB)
 {
-    if(!nterm_has_inst(e, dest) && *dest == Fail) {
+    if(!prod_has_inst(e, dest) && *dest == Fail) {
         return failBB;
     } else {
         LLVMContext &Ctx = getGlobalContext();
@@ -345,19 +345,24 @@ static void stack_peek_frame(IRBuilder<> &builder, Value *sp, Value *fp,
 #endif
 }
 
-static Value *get_callee_function(IRBuilder<> &builder, Value *runtime, uint16_t nterm)
+static Value *get_callee_function(IRBuilder<> &builder, Value *runtime, uint16_t prod_id)
 {
-    Value *r_nterm_entry = create_gep(builder, runtime,
+    Value *r_c_prods = create_gep(builder, runtime,
             builder.getInt64(0),
 #ifdef MOZVM_USE_DYNAMIC_DEACTIVATION
-            builder.getInt32(11)
+            builder.getInt32(11),
 #else
-            builder.getInt32(10)
-#endif
+            builder.getInt32(10),
+#endif /*MOZVM_USE_DYNAMIC_DEACTIVATION*/
+#ifdef MOZVM_USE_JMPTBL
+            builder.getInt32(8)
+#else
+            builder.getInt32(5)
+#endif /*MOZVM_USE_JMPTBL*/
             );
-    Value *entry_head = builder.CreateLoad(r_nterm_entry);
+    Value *entry_head = builder.CreateLoad(r_c_prods);
     Value *callee     = create_gep(builder, entry_head,
-            builder.getInt64(nterm), builder.getInt32(3));
+            builder.getInt64(prod_id), builder.getInt32(4));
     return builder.CreateLoad(callee);
 }
 
@@ -367,9 +372,9 @@ static Value *get_bitset_ptr(IRBuilder<> &builder, Value *runtime, BITSET_t id)
     Value *r_c_sets = create_gep(builder, runtime,
             builder.getInt64(0),
 #ifdef MOZVM_USE_DYNAMIC_DEACTIVATION
-            builder.getInt32(12),
-#else
             builder.getInt32(11),
+#else
+            builder.getInt32(10),
 #endif /*MOZVM_USE_DYNAMIC_DEACTIVATION*/
             builder.getInt32(0));
     Value *sets_head = builder.CreateLoad(r_c_sets);
@@ -398,9 +403,9 @@ static Value *get_tag_ptr(IRBuilder<> &builder, JitContext *ctx, Value *runtime,
     Value *r_c_tags = create_gep(builder, runtime,
             builder.getInt64(0),
 #ifdef MOZVM_USE_DYNAMIC_DEACTIVATION
-            builder.getInt32(12),
-#else
             builder.getInt32(11),
+#else
+            builder.getInt32(10),
 #endif /*MOZVM_USE_DYNAMIC_DEACTIVATION*/
             builder.getInt32(1));
     Value *tags_head = builder.CreateLoad(r_c_tags);
@@ -420,9 +425,9 @@ static Value *get_jump_table(IRBuilder<> &builder, Value *runtime, uint16_t id)
     Value *r_c_jumps = create_gep(builder, runtime,
             builder.getInt64(0),
 #ifdef MOZVM_USE_DYNAMIC_DEACTIVATION
-            builder.getInt32(12),
-#else
             builder.getInt32(11),
+#else
+            builder.getInt32(10),
 #endif /*MOZVM_USE_DYNAMIC_DEACTIVATION*/
             builder.getInt32(4 + N));
     Value *jumps_head = builder.CreateLoad(r_c_jumps);
@@ -519,9 +524,9 @@ static Value *get_string_ptr(IRBuilder<> &builder, Value *runtime, STRING_t id)
     Value *r_c_strs = create_gep(builder, runtime,
             builder.getInt64(0),
 #ifdef MOZVM_USE_DYNAMIC_DEACTIVATION
-            builder.getInt32(12),
-#else
             builder.getInt32(11),
+#else
+            builder.getInt32(10),
 #endif /*MOZVM_USE_DYNAMIC_DEACTIVATION*/
             builder.getInt32(2));
     Value *strs_head = builder.CreateLoad(r_c_strs);
@@ -854,9 +859,9 @@ void mozvm_jit_init(moz_runtime_t *runtime)
 void mozvm_jit_reset(moz_runtime_t *runtime)
 {
 #ifdef MOZVM_JIT_RESET_COMPILED_CODE
-    for (int i = 0; i < runtime->C.nterm_size; i++) {
-        runtime->nterm_entry[i].call_counter  = 0;
-        runtime->nterm_entry[i].compiled_code = mozvm_jit_call_nterm;
+    for (int i = 0; i < runtime->C.prod_size; i++) {
+        runtime->C.prods[i].call_counter  = 0;
+        runtime->C.prods[i].compiled_code = mozvm_jit_call_prod;
     }
 #endif
     delete get_context(runtime);
@@ -869,13 +874,13 @@ void mozvm_jit_dispose(moz_runtime_t *runtime)
     runtime->jit_context = NULL;
 }
 
-uint8_t mozvm_jit_call_nterm(moz_runtime_t *runtime, const char *str, uint16_t nterm)
+uint8_t mozvm_jit_call_prod(moz_runtime_t *runtime, const char *str, uint16_t prod_id)
 {
-    mozvm_nterm_entry_t *e = runtime->nterm_entry + nterm;
+    moz_production_t *e = runtime->C.prods + prod_id;
     if (++(e->call_counter) >  MOZVM_JIT_COUNTER_THRESHOLD) {
         moz_jit_func_t func = mozvm_jit_compile(runtime, e);
         if(func) {
-            return func(runtime, str, nterm);
+            return func(runtime, str, prod_id);
         }
     }
     long *SP = runtime->stack;
@@ -929,7 +934,7 @@ static int optimize(Module *M, Function *F)
 }
 
 static void mozvm_jit_compile_init(moz_runtime_t *runtime,
-        mozvm_nterm_entry_t *e, BBMap &BBMap,
+        moz_production_t *e, BBMap &BBMap,
         BasicBlock *failBB, BasicBlock *errBB,
         vector<BasicBlock *> &failjumpList)
 {
@@ -1031,12 +1036,12 @@ L_prepare_table:
 
 }
 
-moz_jit_func_t mozvm_jit_compile(moz_runtime_t *runtime, mozvm_nterm_entry_t *e)
+moz_jit_func_t mozvm_jit_compile(moz_runtime_t *runtime, moz_production_t *e)
 {
     JitContext *_ctx = get_context(runtime);
-    uint16_t nterm = e - runtime->nterm_entry;
+    uint16_t prod_id = e - runtime->C.prods;
 
-    if(mozvm_nterm_is_already_compiled(e)) {
+    if(mozvm_prod_is_already_compiled(e)) {
         return e->compiled_code;
     }
 
@@ -1044,7 +1049,7 @@ moz_jit_func_t mozvm_jit_compile(moz_runtime_t *runtime, mozvm_nterm_entry_t *e)
     StackFrame_init(&Frame);
     LLVMContext &Ctx = getGlobalContext();
     IRBuilder<> builder(Ctx);
-    Module *M = new Module(runtime->C.nterms[nterm], Ctx);
+    Module *M = new Module(runtime->C.prods[prod_id].name, Ctx);
     _ctx->curMod = M;
     _ctx->EE->addModule(unique_ptr<Module>(M));
 
@@ -1072,15 +1077,15 @@ moz_jit_func_t mozvm_jit_compile(moz_runtime_t *runtime, mozvm_nterm_entry_t *e)
     Constant *f_tblsave     = REGISTER_FUNC(M, symtable_savepoint);
     Constant *f_tblrollback = REGISTER_FUNC(M, symtable_rollback);
 
-    FunctionType *FuncTy = GetFuncType(mozvm_jit_call_nterm);
+    FunctionType *FuncTy = GetFuncType(mozvm_jit_call_prod);
     Function *F = Function::Create(FuncTy,
             Function::ExternalLinkage,
-            runtime->C.nterms[nterm], M);
+            runtime->C.prods[prod_id].name, M);
 
     Function::arg_iterator arg_iter=F->arg_begin();
     Value *runtime_ = arg_iter++;
     Value *str = arg_iter++;
-    // Value *nterm_ = arg_iter++;
+    // Value *prod_id_ = arg_iter++;
 
     vector<BasicBlock *> failjumpList;
     BBMap BBMap;
@@ -1180,12 +1185,12 @@ moz_jit_func_t mozvm_jit_compile(moz_runtime_t *runtime, mozvm_nterm_entry_t *e)
             break;
         }
         CASE_(Call) {
-            uint16_t nterm   = *(uint16_t *)(p + 1);
+            uint16_t prod_id = *(uint16_t *)(p + 1);
             mozaddr_t next   = *(mozaddr_t *)(p + 1 + sizeof(uint16_t));
             moz_inst_t *dest = p + shift + next;
-            mozvm_nterm_entry_t *target = &runtime->nterm_entry[nterm];
+            moz_production_t *target = &runtime->C.prods[prod_id];
 
-            Constant *ID = builder.getInt16(nterm);
+            Constant *ID = builder.getInt16(prod_id);
             Value *func;
 
             // Value *prev_pos_;
@@ -1197,12 +1202,12 @@ moz_jit_func_t mozvm_jit_compile(moz_runtime_t *runtime, mozvm_nterm_entry_t *e)
             // Value *pos = builder.CreateLoad(cur);
             // stack_peek_frame(&Frame, &prev_pos_, &next_, &ast_tx_, &saved_);
             // stack_push_frame(builder, sp, fp, pos, addr, ast_tx_, saved_);
-            if(mozvm_nterm_is_already_compiled(target)) {
-                const char *nterm_name = runtime->C.nterms[nterm];
-                func = M->getOrInsertFunction(nterm_name, FuncTy);
+            if(mozvm_prod_is_already_compiled(target)) {
+                const char *prod_name = runtime->C.prods[prod_id].name;
+                func = M->getOrInsertFunction(prod_name, FuncTy);
             }
             else {
-                func = get_callee_function(builder, runtime_, nterm);
+                func = get_callee_function(builder, runtime_, prod_id);
             }
             // stack_pop_frame(builder, sp, fp, &pos, &addr, &ast_tx_, &saved_);
             Value *result = create_call(builder, func, runtime_, str, ID);

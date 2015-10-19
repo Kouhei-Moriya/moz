@@ -75,7 +75,9 @@ target_link_libraries(moz_dump nez)
 
 if(ENABLE_JIT)
     target_link_libraries(moz ${llvm_libs})
-    target_link_libraries(moz_all ${llvm_libs})
+    if(${CMAKE_BUILD_TYPE} STREQUAL "Small")
+        target_link_libraries(moz_all ${llvm_libs})
+    endif()
     target_link_libraries(moz_stat ${llvm_libs})
 endif()
 

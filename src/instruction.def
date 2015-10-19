@@ -13,9 +13,9 @@ DEF(Alt, mozaddr_t failjump)
     symtable_t *tbl = SYMTABLE_GET();
     MOZVM_PROFILE_INC(ALT_COUNT);
     PUSH_FRAME(GET_POS(), PC + failjump, ast_save_tx(ast), symtable_savepoint(tbl));
-#ifdef MOZVM_DEBUG_NTERM
+#ifdef MOZVM_DEBUG_PROD
     // fprintf(stderr, "%-8s alt   SP=%p FP=%p\n",
-    //         runtime->C.nterms[nterm_id], SP, FP);
+    //         runtime->C.prods[prod_id].name, SP, FP);
 #endif
 }
 DEF(Succ)
@@ -26,12 +26,12 @@ DEF(Jump, mozaddr_t jump)
 {
     JUMP(jump);
 }
-DEF(Call, uint16_t nterm MOZVM_USE_NTERM, mozaddr_t next, mozaddr_t jump)
+DEF(Call, uint16_t prod MOZVM_ENABLE_JIT, mozaddr_t next, mozaddr_t jump)
 {
 #ifdef MOZVM_ENABLE_JIT
-    mozvm_nterm_entry_t *e = runtime->nterm_entry + nterm;
+    moz_production_t *e = runtime->C.prods + prod;
     moz_jit_func_t func = NULL;
-    if (mozvm_nterm_is_already_compiled(e)) {
+    if (mozvm_prod_is_already_compiled(e)) {
         func = e->compiled_code;
     }
     else if (++(e->call_counter) >  MOZVM_JIT_COUNTER_THRESHOLD) {
@@ -41,7 +41,7 @@ DEF(Call, uint16_t nterm MOZVM_USE_NTERM, mozaddr_t next, mozaddr_t jump)
         runtime->stack = SP;
         runtime->fp    = FP;
         runtime->cur   = GET_POS();
-        if (func(runtime, str, nterm)) {
+        if (func(runtime, str, prod)) {
             FAIL();
         }
         SET_POS(runtime->cur);
@@ -49,26 +49,26 @@ DEF(Call, uint16_t nterm MOZVM_USE_NTERM, mozaddr_t next, mozaddr_t jump)
     }
 #endif
 
-#ifdef MOZVM_DEBUG_NTERM
-    PUSH(nterm_id);
-    nterm_id = nterm;
+#ifdef MOZVM_DEBUG_PROD
+    PUSH(prod_id);
+    prod_id = prod;
 #endif
     PUSH(PC + next);
-#ifdef MOZVM_DEBUG_NTERM
+#ifdef MOZVM_DEBUG_PROD
     // fprintf(stderr, "%-8s call  SP=%p FP=%p next=%p, jump=%p\n",
-    //         runtime->C.nterms[nterm_id], SP, FP, PC, PC + jump);
+    //         runtime->C.prods[prod_id].name, SP, FP, PC, PC + jump);
 #else
-    // (void)nterm;
+    // (void)prod;
 #endif
     JUMP(jump);
 }
 DEF(Ret, mozaddr_t dummy)
 {
     moz_inst_t *next = (moz_inst_t *)POP();
-#ifdef MOZVM_DEBUG_NTERM
+#ifdef MOZVM_DEBUG_PROD
     // fprintf(stderr, "%-8s ret   SP=%p FP=%p next=%p\n",
-    //         runtime->C.nterms[nterm_id], SP, FP, next);
-    nterm_id = POP();
+    //         runtime->C.prods[prod_id].name, SP, FP, next);
+    prod_id = POP();
 #endif
     // asm volatile("int3");
     PC = next;
@@ -92,9 +92,9 @@ DEF(Skip)
     mozpos_t *pos;
     PEEK_FRAME(pos, jump, ast_tx, saved);
 #if 0
-#ifdef MOZVM_DEBUG_NTERM
+#ifdef MOZVM_DEBUG_PROD
     fprintf(stderr, "%-8s skip  SP=%p FP=%p\n",
-            runtime->C.nterms[nterm_id], SP, FP);
+            runtime->C.prods[prod_id].name, SP, FP);
 #endif
     fprintf(stderr, "peek %ld\n", *(FP+0));
     fprintf(stderr, "peek %ld\n", *(FP+1));
